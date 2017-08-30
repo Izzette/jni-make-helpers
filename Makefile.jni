@@ -1,0 +1,66 @@
+# Makefile.jni
+
+OUTDIR ?= out
+OUTDIR := $(realpath $(OUTDIR))
+
+CC := gcc
+JAVAC := javac
+JAVAH := javah
+JAR := jar
+
+CFLAGS := -I$(OUTDIR)/include -fPIC $(CFLAGS)
+JAVAHFLAGS := -cp $(OUTDIR)/classes $(JAVAHFLAGS)
+JAVAFLAGS := -cp $(OUTDIR)/classes $(JAVAFLAGS)
+
+jni_prepare: __phony output_directories
+
+.PHONY: __phony
+__phony:
+
+output_directories: __phony
+	mkdir -p \
+		$(OUTDIR) \
+		$(OUTDIR)/classes \
+		$(OUTDIR)/include \
+		$(OUTDIR)/objects \
+		$(OUTDIR)/lib \
+		$(OUTDIR)/jars
+
+$(OUTDIR)/jars/%.jar:manifests/%.txt | output_directories
+	cp $@ $@.new > /dev/null 2>&1 || touch $@.new
+	cd $(OUTDIR)/classes \
+		&& $(JAR) uvfm $@.new \
+			$(realpath $<) \
+			$(patsubst $(OUTDIR)/classes/%.class,%.class,$(filter-out $<,$?))
+	mv $@.new $@
+
+$(OUTDIR)/classes/%.class: src/%.java | output_directories
+	$(JAVAC) $(JAVAFLAGS) -d $(OUTDIR)/classes $<
+
+$(OUTDIR)/include/%.h: $(OUTDIR)/classes/%.class
+	mkdir -p $(shell dirname $@)
+	$(JAVAH) $(JAVAHFLAGS) -o $@ $*
+	touch $@
+
+$(OUTDIR)/objects/%.o: src/%.c | output_directories
+	$(CC) -c $(CFLAGS) $< -o $@
+
+$(OUTDIR)/lib/lib%.so: | output_directories
+	$(CC) -shared $^ -o $@
+
+clean_header_%: __phony
+	rm -f $(OUTDIR)/include/$(subst _,/,$*).h
+
+clean_java_class_%: __phony
+	rm -f $(OUTDIR)/classes/$(subst .,/,$*).class
+
+clean_object_%: __phony
+	rm -f $(OUTDIR)/objects/$*.o
+
+clean_lib_shared_%: __phony
+	rm -f $(OUTDIR)/lib/lib$*.so
+
+clean_java_jar_%: __phony
+	rm -f $(OUTDIR)/jars/$*.jar
+
+# vim: set ts=4 sw=4 noet syn=make:
