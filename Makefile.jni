@@ -1,66 +1,144 @@
 # Makefile.jni
 
 OUTDIR ?= out
-OUTDIR := $(realpath $(OUTDIR))
+JAVA_BASE ?= src/main/java
+C_BASE ?= src/main/c
+
+OUTDIR := $(abspath $(OUTDIR))
+
+CLASSES := $(OUTDIR)/classes
+INCLUDE := $(OUTDIR)/include
+OBJECTS := $(OUTDIR)/objects
+LIB := $(OUTDIR)/lib
+JARS := $(OUTDIR)/jars
+
+OUTSUBDIRS := $(CLASSES) $(INCLUDE) $(OBJECTS) $(LIB) $(JARS)
+OUTSUBDIRS_BASE := $(patsubst $(OUTDIR)/%,%,$(OUTSUBDIRS))
+OUTSUBDIR_CACHES := $(addsuffix /.cache,$(OUTSUBDIRS))
+OUTSUBDIR_CACHE_CLEAN_TARGETS := $(addprefix clean_outsubdir_cache_,$(OUTSUBDIRS_BASE))
+JNI_MAKEFILE_BASE := $(patsubst \
+	$(abspath $(shell pwd))/%,%,$(shell dirname $(abspath $(lastword $(MAKEFILE_LIST)))))
+JNI_JAVA_BASE := $(JNI_MAKEFILE_BASE)/src/main/java
+JNI_LIBRARY_CLASSES := cz.adamh.utils.NativeUtils com.izzette.jni_helpers.FeelingFast
+JNI_LIBRARY_CLASS_FILES := $(patsubst \
+	%,$(CLASSES)/%.class,$(subst .,/,$(JNI_LIBRARY_CLASSES)))
 
 CC := gcc
 JAVAC := javac
 JAVAH := javah
 JAR := jar
 
-CFLAGS := -I$(OUTDIR)/include -fPIC $(CFLAGS)
-JAVAHFLAGS := -cp $(OUTDIR)/classes $(JAVAHFLAGS)
-JAVAFLAGS := -cp $(OUTDIR)/classes $(JAVAFLAGS)
+CFLAGS := -I$(INCLUDE) -fPIC $(CFLAGS)
+JAVAHFLAGS := -cp "$(CLASSES):$(CLASSPATH)" $(JAVAHFLAGS)
+JAVAFLAGS := -cp "$(CLASSES):$(CLASSPATH)" $(JAVAFLAGS)
 
-jni_prepare: __phony output_directories
+define relative_path
+$(patsubst $(abspath $1)/%,%,$(abspath $2))
+endef
+define get_manifets
+$(filter manifests/%.txt,$1)
+endef
+define get_classes
+$(filter $(CLASSES)/%.class,$1)
+endef
+define get_shared_libs
+$(filter $(LIB)/lib%.so,$1)
+endef
+define compile_java
+$1/$2:
+	[ -f $$@ ]
+$$(CLASSES)/$2.class:$1/$2.java | jni_prepare
+	$$(JAVAC) $$(JAVAFLAGS) -d $$(CLASSES) $$<
+$()
+endef
+
+jni_depends: __phony $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
+jni_prepare: __phony $(OUTSUBDIR_CACHES)
+jni_clean_late: clean_outdir | jni_clean_early
+jni_clean_early: __phony
+jni_clean: __phony jni_clean_pre jni_clean_post
 
 .PHONY: __phony
 __phony:
 
-output_directories: __phony
-	mkdir -p \
-		$(OUTDIR) \
-		$(OUTDIR)/classes \
-		$(OUTDIR)/include \
-		$(OUTDIR)/objects \
-		$(OUTDIR)/lib \
-		$(OUTDIR)/jars
-
-$(OUTDIR)/jars/%.jar:manifests/%.txt | output_directories
-	cp $@ $@.new > /dev/null 2>&1 || touch $@.new
-	cd $(OUTDIR)/classes \
-		&& $(JAR) uvfm $@.new \
-			$(realpath $<) \
-			$(patsubst $(OUTDIR)/classes/%.class,%.class,$(filter-out $<,$?))
-	mv $@.new $@
-
-$(OUTDIR)/classes/%.class: src/%.java | output_directories
-	$(JAVAC) $(JAVAFLAGS) -d $(OUTDIR)/classes $<
-
-$(OUTDIR)/include/%.h: $(OUTDIR)/classes/%.class
-	mkdir -p $(shell dirname $@)
-	$(JAVAH) $(JAVAHFLAGS) -o $@ $*
+$(OUTDIR)/%/.cache:
+	mkdir -p $(OUTDIR)/$*
 	touch $@
 
-$(OUTDIR)/objects/%.o: src/%.c | output_directories
+manifests/%.txt:
+	[ -f $@ ]
+
+$(JARS)/%.jar:manifests/%.txt $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
+	cp $@ $@.new > /dev/null 2>&1 || echo > $@.new
+	if ! [ -z $(call get_manifets,$?) ]; then \
+		$(JAR) uvfm $@.new \
+			$(call get_manifets,$?); \
+	fi
+	if ! [ -z "$(call get_classes,$?)" ]; then \
+		cd $(CLASSES) && \
+		$(JAR) uvf $@.new  \
+			$(call relative_path,$(CLASSES),$(call get_classes,$?)); \
+	fi
+	if ! [ -z "$(call get_shared_libs,$?)" ]; then \
+		cd $(OUTDIR) && \
+		$(JAR) uvf $@.new \
+			$(call relative_path,$(OUTDIR),$(call get_shared_libs,$?)); \
+	fi
+	mv $@.new $@
+
+jni_clean_early: | $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
+jni_clean: $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
+
+$(eval $(call compile_java,$(JAVA_BASE),%))
+$(eval $(call compile_java,$(JNI_JAVA_BASE),%))
+
+$(CLASSES)/com/izzette/jni_helpers/FeelingFast.class: \
+	$(CLASSES)/cz/adamh/utils/NativeUtils.class
+
+$(INCLUDE)/%.h: $(CLASSES)/%.class
+	mkdir -p $(shell dirname $@)
+	$(JAVAH) $(JAVAHFLAGS) -o $@ $(subst /,.,$*)
+	touch $@
+
+$(C_BASE)/%.c:
+	[ -f $@ ]
+
+$(OBJECTS)/%.o: $(C_BASE)/%.c | jni_prepare
 	$(CC) -c $(CFLAGS) $< -o $@
 
-$(OUTDIR)/lib/lib%.so: | output_directories
+$(LIB)/lib%.so: | jni_prepare
 	$(CC) -shared $^ -o $@
 
-clean_header_%: __phony
-	rm -f $(OUTDIR)/include/$(subst _,/,$*).h
+clean_outdir: __phony $(OUTSUBDIR_CACHE_CLEAN_TARGETS) | jni_clean_early
+	if [ -d $(OUTDIR) ]; then \
+		rmdir $(OUTDIR); \
+	fi
 
-clean_java_class_%: __phony
-	rm -f $(OUTDIR)/classes/$(subst .,/,$*).class
-
-clean_object_%: __phony
-	rm -f $(OUTDIR)/objects/$*.o
-
-clean_lib_shared_%: __phony
-	rm -f $(OUTDIR)/lib/lib$*.so
+clean_outsubdir_cache_%: __phony | jni_clean_early
+	if [ -d $(OUTDIR)/$* ]; then \
+		cd $(OUTDIR)/$* && \
+		subdirs="$$(find * -type d -empty 2> /dev/null || true)" && \
+		if ! [ -z "$$subdirs" ]; then \
+			rmdir -p $$subdirs || exit 1; \
+		fi; \
+		rm .cache && \
+		cd .. && \
+		rmdir $*; \
+	fi
 
 clean_java_jar_%: __phony
-	rm -f $(OUTDIR)/jars/$*.jar
+	rm -f $(JARS)/$*.jar
+
+clean_lib_shared_%: __phony
+	rm -f $(LIB)/lib$*.so
+
+clean_object_%: __phony
+	rm -f $(OBJECTS)/$*.o
+
+clean_header_%: __phony
+	rm -f $(INCLUDE)/$(subst .,/,$*).h
+
+clean_java_class_%: __phony
+	rm -f $(CLASSES)/$(subst .,/,$*).class
 
 # vim: set ts=4 sw=4 noet syn=make:
