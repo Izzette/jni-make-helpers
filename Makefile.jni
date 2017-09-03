@@ -121,7 +121,7 @@ clean_outsubdir_cache_%: __phony | jni_clean_early
 		if ! [ -z "$$subdirs" ]; then \
 			rmdir -p $$subdirs || exit 1; \
 		fi; \
-		rm .cache && \
+		rm -f .cache && \
 		cd .. && \
 		rmdir $*; \
 	fi
