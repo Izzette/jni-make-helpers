@@ -1,5 +1,6 @@
 # Makefile.jni
 
+JAVA_HOME ?= /usr/lib/jvm/default
 OUTDIR ?= out
 JAVA_BASE ?= src/main/java
 C_BASE ?= src/main/c
@@ -28,9 +29,17 @@ JAVAC := javac
 JAVAH := javah
 JAR := jar
 
-CFLAGS := -I$(INCLUDE) -fPIC $(CFLAGS)
-JAVAHFLAGS := -cp "$(CLASSES):$(CLASSPATH)" $(JAVAHFLAGS)
-JAVAFLAGS := -cp "$(CLASSES):$(CLASSPATH)" $(JAVAFLAGS)
+ifdef CLASSPATH
+CLASSPATH := $(CLASSES):$(CLASSPATH)
+else
+CLASSPATH := $(CLASSES)
+endif
+
+CFLAGS := -I'$(INCLUDE)' -I'$(JAVA_HOME)/include' \
+	-I'$(JAVA_HOME)/include/$(shell uname | tr '[:upper:]' '[:lower:]')' -fPIC $(CFLAGS)
+LDFLAGS := -L'$(LIB)' $(LDFLAGS)
+JAVAHFLAGS := -cp '$(CLASSPATH)' $(JAVAHFLAGS)
+JAVAFLAGS := -cp '$(CLASSPATH)' $(JAVAFLAGS)
 
 define relative_path
 $(patsubst $(abspath $1)/%,%,$(abspath $2))
@@ -46,9 +55,9 @@ $(filter $(LIB)/lib%.so,$1)
 endef
 define compile_java
 $1/$2:
-	[ -f $$@ ]
+	[ -f '$$@' ]
 $$(CLASSES)/$2.class:$1/$2.java | jni_prepare
-	$$(JAVAC) $$(JAVAFLAGS) -d $$(CLASSES) $$<
+	$$(JAVAC) $$(JAVAFLAGS) -d '$$(CLASSES)' '$$<'
 $()
 endef
 
@@ -62,29 +71,32 @@ jni_clean: __phony jni_clean_pre jni_clean_post
 __phony:
 
 $(OUTDIR)/%/.cache:
-	mkdir -p $(OUTDIR)/$*
-	touch $@
+	mkdir -p '$(OUTDIR)/$*'
+	touch '$@'
 
 manifests/%.txt:
-	[ -f $@ ]
+	[ -f '$@' ]
 
 $(JARS)/%.jar:manifests/%.txt $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
-	cp $@ $@.new > /dev/null 2>&1 || echo > $@.new
-	if ! [ -z $(call get_manifets,$?) ]; then \
-		$(JAR) uvfm $@.new \
-			$(call get_manifets,$?); \
+	cp '$@' '$@.new' > /dev/null 2>&1 || echo > '$@.new'
+	if ! [ -z '$(call get_manifets,$?)' ]; then \
+		$(JAR) uvfm '$@.new' \
+			$(foreach \
+				m,$(call get_manifets,$?),'$(m)'); \
 	fi
 	if ! [ -z "$(call get_classes,$?)" ]; then \
-		cd $(CLASSES) && \
-		$(JAR) uvf $@.new  \
-			$(call relative_path,$(CLASSES),$(call get_classes,$?)); \
+		cd '$(CLASSES)' && \
+		$(JAR) uvf '$@.new'  \
+			$(foreach \
+				c,$(call relative_path,$(CLASSES),$(call get_classes,$?)),'$(c)'); \
 	fi
-	if ! [ -z "$(call get_shared_libs,$?)" ]; then \
-		cd $(OUTDIR) && \
-		$(JAR) uvf $@.new \
-			$(call relative_path,$(OUTDIR),$(call get_shared_libs,$?)); \
+	if ! [ -z '$(call get_shared_libs,$?)' ]; then \
+		cd '$(OUTDIR)' && \
+		$(JAR) uvf '$@.new' \
+			$(foreach \
+				l,$(call relative_path,$(OUTDIR),$(call get_shared_libs,$?)),'$(l)'); \
 	fi
-	mv $@.new $@
+	mv '$@.new' '$@'
 
 jni_clean_early: | $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
 jni_clean: $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
@@ -97,48 +109,48 @@ $(CLASSES)/com/izzette/jni_helpers/FeelingFast.class: \
 
 $(INCLUDE)/%.h: $(CLASSES)/%.class
 	mkdir -p $(shell dirname $@)
-	$(JAVAH) $(JAVAHFLAGS) -o $@ $(subst /,.,$*)
+	$(JAVAH) $(JAVAHFLAGS) -o '$@' '$(subst /,.,$*)'
 	touch $@
 
 $(C_BASE)/%.c:
 	[ -f $@ ]
 
-$(OBJECTS)/%.o: $(C_BASE)/%.c | jni_prepare
-	$(CC) -c $(CFLAGS) $< -o $@
+$(OBJECTS)/%.o:$(C_BASE)/%.c | jni_prepare
+	$(CC) -c $(CFLAGS) '$<' -o '$@'
 
 $(LIB)/lib%.so: | jni_prepare
-	$(CC) -shared $^ -o $@
+	$(CC) -shared $(foreach o,$^,'$(o)') $(LDFLAGS) -o '$@'
 
 clean_outdir: __phony $(OUTSUBDIR_CACHE_CLEAN_TARGETS) | jni_clean_early
-	if [ -d $(OUTDIR) ]; then \
-		rmdir $(OUTDIR); \
+	if [ -d '$(OUTDIR)' ]; then \
+		rmdir '$(OUTDIR)'; \
 	fi
 
 clean_outsubdir_cache_%: __phony | jni_clean_early
-	if [ -d $(OUTDIR)/$* ]; then \
-		cd $(OUTDIR)/$* && \
+	if [ -d '$(OUTDIR)/$*' ]; then \
+		cd '$(OUTDIR)/$*' && \
 		subdirs="$$(find * -type d -empty 2> /dev/null || true)" && \
 		if ! [ -z "$$subdirs" ]; then \
 			rmdir -p $$subdirs || exit 1; \
 		fi; \
 		rm -f .cache && \
 		cd .. && \
-		rmdir $*; \
+		rmdir '$*'; \
 	fi
 
 clean_java_jar_%: __phony
-	rm -f $(JARS)/$*.jar
+	rm -f '$(JARS)/$*.jar'
 
 clean_lib_shared_%: __phony
-	rm -f $(LIB)/lib$*.so
+	rm -f '$(LIB)/lib$*.so'
 
 clean_object_%: __phony
-	rm -f $(OBJECTS)/$*.o
+	rm -f '$(OBJECTS)/$*.o'
 
 clean_header_%: __phony
-	rm -f $(INCLUDE)/$(subst .,/,$*).h
+	rm -f '$(INCLUDE)/$(subst .,/,$*).h'
 
 clean_java_class_%: __phony
-	rm -f $(CLASSES)/$(subst .,/,$*).class
+	rm -f '$(CLASSES)/$(subst .,/,$*).class'
 
 # vim: set ts=4 sw=4 noet syn=make:
