@@ -54,25 +54,46 @@ define get_shared_libs
 $(filter $(LIB)/lib%.so,$1)
 endef
 define compile_java
-$1/$2:
+$1/$2.java:
 	[ -f '$$@' ]
-$$(CLASSES)/$2.class:$1/$2.java | jni_prepare
-	$$(JAVAC) $$(JAVAFLAGS) -d '$$(CLASSES)' '$$<'
+$$(CLASSES)/$(subst .,/,$2).class:$1/$(subst .,/,$2).java | jni_prepare
+	$$(JAVAC) $$(JAVAFLAGS) $3 -d '$$(CLASSES)' '$$<'
 $()
+endef
+define compile_java_nested
+$$(CLASSES)/$(subst .,/,$1)$$$$$(subst .,$$$$,$2).class: $$(CLASSES)/$(subst .,/,$1).class
+	[ -f '$$@' ] && touch '$$@'
+endef
+define compile_c
+$1/$2.c:
+	[ -f '$$@' ]
+$$(OBJECTS)/$2.o:$1/$2.c | jni_prepare
+	$$(CC) -c $$(CFLAGS) $3 '$$<' -o '$$@'
+endef
+define link_shared
+$$(LIB)/lib$1.so: | jni_prepare
+	$$(CC) -shared $$(foreach o,$$^,'$$(o)') $$(LDFLAGS) $2 -o '$$@'
 endef
 
 jni_depends: __phony $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
 jni_prepare: __phony $(OUTSUBDIR_CACHES)
-jni_clean_late: clean_outdir | jni_clean_early
+jni_clean_late: | jni_clean_early
 jni_clean_early: __phony
 jni_clean: __phony jni_clean_pre jni_clean_post
 
 .PHONY: __phony
 __phony:
 
+$(CLASSES)/com/izzette/jni_helpers/FeelingFast.class: \
+	$(CLASSES)/cz/adamh/utils/NativeUtils.class
+jni_clean_early: | $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
+jni_clean: $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
+
 $(OUTDIR)/%/.cache:
 	mkdir -p '$(OUTDIR)/$*'
 	touch '$@'
+
+jni_clean_late: clean_outdir
 
 manifests/%.txt:
 	[ -f '$@' ]
@@ -98,28 +119,16 @@ $(JARS)/%.jar:manifests/%.txt $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
 	fi
 	mv '$@.new' '$@'
 
-jni_clean_early: | $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
-jni_clean: $(addprefix clean_java_class_,$(JNI_LIBRARY_CLASSES))
-
-$(eval $(call compile_java,$(JAVA_BASE),%))
-$(eval $(call compile_java,$(JNI_JAVA_BASE),%))
-
-$(CLASSES)/com/izzette/jni_helpers/FeelingFast.class: \
-	$(CLASSES)/cz/adamh/utils/NativeUtils.class
+$(eval $(call compile_java,$(JAVA_BASE),%,))
+$(eval $(call compile_java,$(JNI_JAVA_BASE),%,))
 
 $(INCLUDE)/%.h: $(CLASSES)/%.class
 	mkdir -p $(shell dirname $@)
 	$(JAVAH) $(JAVAHFLAGS) -o '$@' '$(subst /,.,$*)'
 	touch $@
 
-$(C_BASE)/%.c:
-	[ -f $@ ]
-
-$(OBJECTS)/%.o:$(C_BASE)/%.c | jni_prepare
-	$(CC) -c $(CFLAGS) '$<' -o '$@'
-
-$(LIB)/lib%.so: | jni_prepare
-	$(CC) -shared $(foreach o,$^,'$(o)') $(LDFLAGS) -o '$@'
+$(eval $(call compile_c,$(C_BASE),%,))
+$(eval $(call link_shared,%,))
 
 clean_outdir: __phony $(OUTSUBDIR_CACHE_CLEAN_TARGETS) | jni_clean_early
 	if [ -d '$(OUTDIR)' ]; then \
