@@ -77,9 +77,9 @@ endef
 
 jni_depends: __phony $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
 jni_prepare: __phony $(OUTSUBDIR_CACHES)
-jni_clean_late: | jni_clean_early
+jni_clean_late: __phony | jni_clean_early
 jni_clean_early: __phony
-jni_clean: __phony jni_clean_pre jni_clean_post
+jni_clean: __phony jni_clean_early jni_clean_late
 
 .PHONY: __phony
 __phony:
