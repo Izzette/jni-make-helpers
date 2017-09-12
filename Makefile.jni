@@ -121,6 +121,7 @@ $(JARS)/%.jar:manifests/%.txt $(JNI_LIBRARY_CLASS_FILES) | jni_prepare
 
 $(eval $(call compile_java,$(JAVA_BASE),%,))
 $(eval $(call compile_java,$(JNI_JAVA_BASE),%,))
+$(eval $(call compile_java,$(JNI_MAKEFILE_BASE)/native-utils/src/main/java,%,))
 
 $(INCLUDE)/%.h: $(CLASSES)/%.class
 	mkdir -p $(shell dirname $@)
